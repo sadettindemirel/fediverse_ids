@@ -1,0 +1,278 @@
+---
+title: "nrc_sentiment"
+author: "Sadettin Demirel"
+date: "29/12/2023"
+output: html_document
+---
+
+# PREP
+
+```{r include=FALSE}
+library("tidyverse")
+library("tidytext")
+library("lubridate")
+library("quanteda")
+library("forcats")
+library("quanteda.textplots")
+library("quanteda.textstats")
+library("scales")
+Sys.setlocale("LC_ALL", 'en_US.UTF-8')
+```
+
+```{r include=FALSE}
+theme_poppins <- function() {
+  theme_minimal() +
+    theme(
+      text = element_text(family = "Poppins", color = "gray25"),
+      plot.title = element_text(face = "bold",size = 12),
+      plot.title.position = "plot",
+      plot.subtitle = element_text(size = 11),
+      axis.text.x= element_text(size=10),
+      axis.text.y = element_text(size=10),
+      plot.caption = element_text(size = 10, color = "gray30"),
+      plot.background = element_rect(fill = "#ffffff"),
+      legend.position = "none",
+      strip.background = element_rect(colour = "#d9d9d9", fill = "#d9d9d9"),
+      strip.text.x = element_text(size = 10, colour = "gray25", face = "bold"))
+}
+
+renks2 <- c("positive"="#2a9d8f",
+"negative" ="#e76f51",
+"neutral"="#dad7cd"
+)
+
+
+renks2 <- c("positive"="#1ABC9C",
+           "negative" ="#E74C3C",
+           "neutral"="#6baed6"
+           )
+renks1 <- c("positive"="#1ABC9C",
+           "negative" ="#E74C3C"
+           )
+
+theme_poppins2 <-function() {
+  theme_minimal() +
+    theme(
+      text = element_text(family = "Poppins", color = "gray25"),
+      plot.title = element_text(face = "bold", size = 12),
+      plot.title.position = "plot",
+      plot.subtitle = element_text(size = 11),
+      axis.text.x = element_text(size = 10),
+      axis.text.y = element_text(size = 10),
+      plot.caption = element_text(size = 10, color = "gray30"),
+      plot.background = element_rect(fill = "#ffffff", colour = NA), # Fix: Remove border
+      legend.position = "none",
+      strip.background = element_rect(colour = "#d9d9d9", fill = "#d9d9d9"),
+      strip.text.x = element_text(size = 10, colour = "gray25", face = "bold")
+    )
+}
+```
+
+
+
+```{r}
+tidy_mastodon <- readRDS("tidy_mastodon_ai_posts.rds") %>% rename(text =content_clean) %>% filter(!is.na(text)) %>% filter(!is.na(durum))%>% filter(!str_detect(text,"Wordle")) %>% filter(!username %in%c("news","drkirkadams","craigbrownphd"))
+tidy_bsky <- readRDS("tidy_bsky_ai_posts.rds") %>% filter(!str_detect(name,"Artersum|Fantavaria|Timóteo Machado")) %>% filter(!is.na(text)) %>%  filter(!is.na(durum)) 
+
+mastodon_corpus <- corpus(tidy_mastodon)
+bsky_corpus <- corpus(tidy_bsky)
+```
+
+### Data Preparation
+
+```{r}
+stop_word_nrc <- c("artificial","intelligence")
+
+unigram_dfm1 <- tokens(mastodon_corpus, remove_numbers = T, remove_url = T)  %>% tokens_remove(pattern = stop_word_nrc ) %>%  dfm()
+
+unigram_dfm2 <- tokens(bsky_corpus, remove_numbers = T, remove_url = T)  %>% tokens_remove(pattern = stop_word_nrc ) %>%  dfm()
+
+docvars(unigram_dfm1) %>% head()
+docvars(unigram_dfm2) %>% head()
+
+
+```
+
+
+```{r}
+bsky_words <- textstat_frequency(unigram_dfm1) 
+mastodon_words <- textstat_frequency(unigram_dfm2) 
+```
+
+# NRC Sentiment Analysis
+
+```{r}
+nrc_sentiment <- readRDS("nrc_sentiment_data.rds") %>% select(feature = word, everything())
+```
+
+
+```{r}
+nrc_words_bsky <- inner_join(bsky_words, nrc_sentiment)
+head(nrc_words_bsky, 50)
+
+nrc_words_mastodon <- inner_join(mastodon_words, nrc_sentiment)
+head(nrc_words_bsky, 50)
+
+```
+
+```{r}
+stop_word_nrc <- c("time")
+
+nrc_words_bsky %>%filter(!feature %in% stop_word_nrc) %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% mutate(perc=total/sum(total)*100) %>% arrange (desc(perc)) 
+
+nrc_words_mastodon %>%filter(!feature %in% stop_word_nrc) %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% mutate(perc=total/sum(total)*100) %>% arrange (desc(perc)) 
+```
+
+
+
+**Total Words in NRC Categories**
+
+```{r}
+stop_word_nrc <- c("time")
+
+nrc_words_bsky %>%filter(!feature %in% stop_word_nrc) %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% mutate(perc=total/sum(total)*100) %>% arrange (desc(perc)) %>% 
+  ggplot(aes(fct_reorder(sentiment, perc), perc))+geom_col()+coord_flip()+theme_poppins()+labs(x ="",y="percentage of words")
+
+#ggsave("nrc_sent_emotion.png",dpi=600, width = 7, height = 5)
+```
+
+
+
+```{r}
+#polarite
+renksx <- c("mastodon"="#ff9300",
+"bsky" ="#1DA1F2")
+
+bind_rows(nrc_words_bsky %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% filter(sentiment%in% c("positive","negative")) %>%  mutate(perc=total/sum(total)*100) %>% select(1,3) %>% mutate(tweets = "bsky"),
+          nrc_words_mastodon %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% 
+            filter(sentiment%in% c("positive","negative")) %>% 
+            mutate(perc=total/sum(total)*100) %>% select(1,3) %>% mutate(tweets = "mastodon", perc = perc*-1)) %>% 
+  mutate(sentiment = fct_rev(factor(sentiment, levels=c("positive","negative")))) %>%  # fct_rev() burada eklendi
+  ggplot(aes(sentiment, perc, fill = tweets))+geom_col(alpha = 0.8)+coord_flip()+theme_poppins2()+labs(x ="",y="percentage of words")+geom_text(aes(label = sprintf("%0.1f", perc), vjust = ifelse(perc >= 0, -0.2, 1),hjust = ifelse(perc >= 0, -0.2, 1.2)),  # Dinamik vjust
+            position = position_dodge(width = 0.9))+
+  scale_fill_manual(values = renksx)+
+    ylim(-75,75)
+
+ggsave("nrc_dist.png",devic = "png", dpi=600, width = 8, height = 2.5)
+```
+
+
+
+```{r}
+renksx <- c("mastodon"="#ff9300",
+"bsky" ="#1DA1F2")
+#emotiom
+bind_rows(nrc_words_bsky %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% filter(!sentiment%in% c("positive","negative")) %>%  mutate(perc=total/sum(total)*100) %>% select(1,3) %>% mutate(tweets = "bsky"),
+          nrc_words_mastodon %>% group_by(sentiment) %>% summarise(total = sum(frequency)) %>% 
+            filter(!sentiment%in% c("positive","negative")) %>% 
+            mutate(perc=total/sum(total)*100) %>% select(1,3) %>% mutate(tweets = "mastodon", perc = perc*-1)) %>% 
+  mutate(sentiment = fct_rev(factor(sentiment, levels=c("trust","anticipation","joy","fear","sadness","anger","surprise","disgust")))) %>%  # fct_rev() burada eklendi
+  ggplot(aes(sentiment, perc, fill = tweets))+geom_col(alpha = 0.8)+coord_flip()+theme_poppins2()+labs(x ="",y="percentage of words")+geom_text(aes(label = sprintf("%0.1f", perc), vjust = ifelse(perc >= 0, -0.2, 1),hjust = ifelse(perc >= 0, -0.2, 1.2)),  # Dinamik vjust
+            position = position_dodge(width = 0.9))+
+  scale_fill_manual(values = renksx)+
+  ylim(-32,32)
+
+ggsave("nrc_dist2.png",devic = "png", dpi=600, width = 8, height = 5)
+```
+
+**Top 10 Words in NRC Emotions**
+
+```{r}
+nrc_words_bsky %>% head()
+```
+
+```{r}
+color_nrc <- c("anger" ="#E6194B",
+               "disgust"="#3CB44B",
+               "fear"="#911EB4",
+               "sadness"="#4363D8",
+               "anticipation"="#F58231",
+               "joy"="#dec310",
+               "surprise"="#F032E6",
+               "trust"="#42D4F4"
+               )
+```
+
+
+```{r}
+stop_word_nrc <- c("time","sex","real","including","top","study")
+```
+
+```{r}
+nrc_words_bsky %>% filter(!sentiment %in% c("positive","negative","anticipation","joy","trust","surprise")) %>% 
+  filter(!feature %in% stop_word_nrc) %>%
+  group_by(sentiment) %>% arrange(desc(frequency)) %>% slice_max(frequency, n=15, with_ties = F ) %>%
+  ggplot(aes(fct_reorder(feature,frequency),frequency, fill = sentiment, color =sentiment))+geom_point(size =5.8)+scale_fill_manual(values = color_nrc)+scale_color_manual(values = color_nrc)+ geom_col()+coord_flip()+
+  facet_wrap(~sentiment, scales = "free_y", ncol = 2)+
+  theme_poppins()+labs(x=" ",y=" ",title = " ")+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3))
+
+#ggsave("top20nrcemotions.png",dpi=600, width = 8, height = 7.3)
+```
+
+```{r}
+nrc_words_bsky %>% filter(sentiment %in% c("anticipation","joy","trust","surprise")) %>% 
+  filter(!feature %in% stop_word_nrc) %>%
+  group_by(sentiment) %>% arrange(desc(frequency)) %>% slice_max(frequency, n=15, with_ties = F ) %>%
+  ggplot(aes(fct_reorder(feature,frequency),frequency, fill = sentiment, color =sentiment))+geom_point(size =5.5)+scale_fill_manual(values = color_nrc)+scale_color_manual(values = color_nrc)+ geom_col()+coord_flip()+
+  facet_wrap(~sentiment, scales = "free_y", ncol = 2)+
+  theme_poppins()+labs(x=" ",y=" ",title = " ")+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3))
+
+#ggsave("top20nrcemotions2.png",dpi=600, width = 8, height = 7.3)
+```
+
+```{r}
+library(ggwordcloud)
+```
+
+
+```{r}
+#stop_word_nrc <- c("time","sex","real","including","top","study","visit","united","increase","highest","doctor","full","important","continue","level","worry","bad","shot","wait","calls")
+
+nrc_words_bsky %>% filter(sentiment %in% c("positive","negative")) %>% 
+  filter(!feature %in% stop_word_nrc) %>% 
+  group_by(sentiment) %>% arrange(desc(frequency)) %>% slice_max(frequency, n=20) %>%
+  ggplot(aes(fct_reorder(feature,frequency),frequency, fill = sentiment))+
+  geom_col()+coord_flip()+
+  scale_fill_manual(values = renks2)+
+  facet_wrap(~sentiment, scales = "free_y", ncol = 4)+
+  theme_poppins()+labs(x="",y="",title = "")+scale_y_continuous(breaks = scales::pretty_breaks(n = 3))
+
+nrc_words_bsky %>% filter(!sentiment %in% c("positive","negative")) %>% 
+  filter(!feature %in% stop_word_nrc) %>% 
+  group_by(sentiment) %>% arrange(desc(frequency)) %>% slice_max(frequency, n=20) %>%
+  ggplot(aes(fct_reorder(feature,frequency),frequency, fill = sentiment))+
+  geom_col()+coord_flip()+
+  facet_wrap(~sentiment, scales = "free_y", ncol = 4)+
+  theme_poppins()+labs(x="",y="",title = "")+scale_y_continuous(breaks = scales::pretty_breaks(n = 2))
+
+
+#ggsave("topnrc_sentiment2.png",dpi=600, width = 7, height = 5)
+
+
+nrc_words_mastodon %>% filter(sentiment %in% c("positive","negative")) %>% 
+  filter(!feature %in% stop_word_nrc) %>% 
+  group_by(sentiment) %>% arrange(desc(frequency)) %>% slice_max(frequency, n=20) %>%
+  ggplot(aes(fct_reorder(feature,frequency),frequency, fill = sentiment))+
+  geom_col()+coord_flip()+
+  scale_fill_manual(values = renks2)+
+  facet_wrap(~sentiment, scales = "free_y", ncol = 4)+
+  theme_poppins()+labs(x="",y="",title = "")+scale_y_continuous(breaks = scales::pretty_breaks(n = 3))
+
+nrc_words_mastodon %>% filter(!sentiment %in% c("positive","negative")) %>% 
+  filter(!feature %in% stop_word_nrc) %>% 
+  group_by(sentiment) %>% arrange(desc(frequency)) %>% slice_max(frequency, n=20) %>%
+  ggplot(aes(fct_reorder(feature,frequency),frequency, fill = sentiment))+
+  geom_col()+coord_flip()+
+  facet_wrap(~sentiment, scales = "free_y", ncol = 4)+
+  theme_poppins()+labs(x="",y="",title = "")+scale_y_continuous(breaks = scales::pretty_breaks(n = 2))
+
+#ggsave("topnrc_sentiment2.png",dpi=600, width = 7, height = 5)
+
+```
+
+
+
+
+

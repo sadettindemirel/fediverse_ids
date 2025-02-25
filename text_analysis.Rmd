@@ -1,0 +1,227 @@
+---
+title: "metin_analiz"
+output: html_document
+date: "2024-11-03"
+---
+
+
+```{r include=FALSE}
+library("tidyverse")
+library("tidytext")
+library("lubridate")
+library("quanteda")
+library("forcats")
+library("quanteda.textplots")
+library("quanteda.textstats")
+library("scales")
+Sys.setlocale("LC_ALL", 'en_US.UTF-8')
+options(scipen=999)
+library(cowplot)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+theme_poppins <- function() {
+  theme_minimal() +
+    theme(
+      text = element_text(family = "Poppins", color = "gray25"),
+      plot.title = element_text(face = "bold", size = 12),
+      plot.title.position = "plot",
+      plot.subtitle = element_text(size = 11),
+      axis.text.x = element_text(size = 10),
+      axis.text.y = element_text(size = 10),
+      plot.caption = element_text(size = 10, color = "gray30"),
+      plot.background = element_rect(fill = "#ffffff", colour = NA), # Fix: Remove border
+      legend.position = "none",
+      strip.background = element_rect(colour = "#d9d9d9", fill = "#d9d9d9"),
+      strip.text.x = element_text(size = 10, colour = "gray25", face = "bold")
+    )
+}
+```
+
+
+
+
+**GENERAL WORD FREQS**
+
+```{r}
+tidy_mastodon <- readRDS("tidy_mastodon_ai_posts.rds") %>% rename(text =content_clean) %>% filter(!is.na(text)) %>% filter(!is.na(durum))%>% filter(!str_detect(text,"Wordle")) %>% filter(!username %in%c("news","drkirkadams","craigbrownphd"))
+tidy_bsky <- readRDS("tidy_bsky_ai_posts.rds") %>% filter(!str_detect(name,"Artersum|Fantavaria|Timóteo Machado")) %>% filter(!is.na(text)) %>%  filter(!is.na(durum)) 
+```
+
+```{r}
+#genel corpus
+mastodon_corpus <- corpus(tidy_mastodon)
+bsky_corpus <- corpus(tidy_bsky)
+#vader corpus
+#tidy_data_corpus_vader <- corpus_subset(tidy_data_corpus, docvars(tidy_data_corpus)$durum %in% c("positive", "negative"))
+```
+
+
+```{r}
+custom_stopwords <- c("artificial","intelligence","ai","it’s","amp*","utm_*","dlvr*","ıntelligence","technology","ai","aı","und","nbsp","mastodon","day","von","zu","oneironautics","op","steps","20data","20engineer*","quot","der","bsky*")
+
+
+tokenler <- function(x){
+  
+  tokens(x, remove_punct = T, remove_numbers = T, remove_url = T,
+         remove_symbols = T) %>% 
+    tokens_tolower() %>%
+    tokens_select(pattern = stopwords(language = "en",source = "smart"), selection = "remove") %>% 
+    tokens_select(pattern = stopwords(language = "en",source = "nltk"), selection = "remove") %>% 
+    tokens_select(pattern = stopwords(language = "en",source = "stopwords-iso"), selection = "remove") %>% 
+    tokens_select(pattern = custom_stopwords, selection = "remove") %>% 
+    tokens_select(pattern = "([A-Za-z]){2,}", valuetype = "regex", selection = "keep") %>% 
+    tokens_replace(pattern = "'s\\b", valuetype = "regex", replacement = "",case_insensitive = FALSE) %>% 
+    tokens_remove(pattern = "") %>% 
+    tokens_remove(pattern = "@*") %>%
+    tokens_remove(pattern = "-*") %>% 
+    tokens_remove(pattern = "#*")
+}
+
+```
+
+
+```{r}
+#mastodon
+custom_stopwords2 <- c("quot_*","feed_id_*","published_*","image_nostr-*","nostr-beaware.s3*","us-east-005*","infoq_content_*","sep_social","soundcloud.com_*","	jun_medium*","moin_jesper","use.also_*","months_moin","jul_medium","jul_medium")
+
+mast_unigram_tokens <- tokenler(mastodon_corpus)
+mast_bigram_tokens<- mast_unigram_tokens %>%  
+  tokens_ngrams(n=2) %>%  tokens_select(pattern = custom_stopwords2, selection = "remove") %>% 
+  tokens_remove(pattern = c("medium_social","volume_issue","uploaded_*","systems_volume","dec_social","weekly_review","build_real_world","ko-fi_*","completely_*","newsletter_subscribers","subscribers_learned","learned_months","stay_loop","nov_social","jun_medium","oct_social","seeds_photo*","natural_*","blog_post","cybernews_post","share_non-hype","non-hype_build","york_times","language_model","social_campaign"))
+
+mast_unigrams <- dfm(mast_unigram_tokens)
+mast_dfm_bigrams <- dfm(mast_bigram_tokens)
+
+textstat_frequency(mast_dfm_bigrams, n=50)
+```
+
+```{r}
+mast1 <- textstat_frequency(mast_unigrams) %>% slice_max(frequency, n= 25, with_ties = F)  %>% 
+  ggplot(aes(fct_reorder(feature, frequency), frequency))+
+  geom_col(show.legend = F, fill = "#ff9300")+coord_flip()+theme_poppins()+labs(x = "",y="")
+mast1
+
+mast2 <- textstat_frequency(mast_dfm_bigrams) %>% slice_max(frequency, n= 25, with_ties = F)  %>% 
+  ggplot(aes(fct_reorder(feature, frequency), frequency))+
+  geom_col(show.legend = F, fill = "#ff9300")+coord_flip()+theme_poppins()+labs(x = "",y="")
+
+mast2
+```
+
+```{r}
+plot_grid(mast1, mast2)
+ggsave("mastadon_uni_bigrams.png", device = "png", dpi = 600, width = 9, height = 5.5)
+```
+
+
+```{r}
+#bsky
+
+custom_stopwords2 <- c("quot_*","feed_id_*","published_*","image_nostr-*","nostr-beaware.s3*","us-east-005*","infoq_content_*","sep_social","soundcloud.com_*","	jun_medium*","moin_jesper","use.also_*","months_moin","jul_medium","jul_medium","bsky.social")
+#vader tokens 
+bsky_unigram_tokens <- tokenler(bsky_corpus) %>% tokens_remove (pattern = c("playing"))
+bsky_bigram_tokens<- bsky_unigram_tokens %>%  
+  tokens_ngrams(n=2) %>%  tokens_select(pattern = custom_stopwords2, selection = "remove") %>% 
+  tokens_remove(pattern = c("9to5mac_apple","label_ios","features_beta","signaling_apple","motley_fool","info_ecosearch","apple_label","preview_signaling","tech_giant*","news_nasdaq","fox_news","beta_preview","logistic_regression","natural_stupidity","language_model","advanced_machine","elon_musk's"))
+
+bsky_unigrams <- dfm(bsky_unigram_tokens)
+bsky_dfm_bigrams <- dfm(bsky_bigram_tokens)
+
+textstat_frequency(bsky_dfm_bigrams, n=50)
+```
+
+
+```{r}
+bsky1 <- textstat_frequency(bsky_unigrams) %>% slice_max(frequency, n= 25, with_ties = F)  %>% 
+  ggplot(aes(fct_reorder(feature, frequency), frequency))+
+  geom_col(show.legend = F, fill = "#1DA1F2")+coord_flip()+theme_poppins()+labs(x = "",y="")
+
+bsky1
+
+bsky2 <- textstat_frequency(bsky_dfm_bigrams) %>% filter(!str_detect(feature,"elon_musk’s")) %>% slice_max(frequency, n= 25, with_ties = F)  %>% 
+  ggplot(aes(fct_reorder(feature, frequency), frequency))+
+  geom_col(show.legend = F, fill = "#1DA1F2")+coord_flip()+theme_poppins()+labs(x = "",y="")
+
+bsky2
+```
+
+*all plots*
+
+```{r}
+plot_grid(bsky1, bsky2)
+ggsave("bsky_uni_bigrams.png", device = "png", dpi = 600, width = 9, height = 5.5)
+```
+**HASHTAG FREQUENCY**
+
+*Hashtag Freqs*
+
+
+```{r}
+custom_hash <- c("#ai","#artificialintelligence","#generativeai","#genai","#artificial","#intelligence")
+
+mast_hashtags_dfm <- 
+  tokens(mastodon_corpus) %>%
+  tokens_tolower() %>%
+  tokens_select(pattern = "#*") %>%
+  tokens_select(pattern = "[A-Za-z]", valuetype = "regex") %>% 
+  dfm() %>% 
+  dfm_remove(pattern =custom_hash) 
+
+
+head(mast_hashtags_dfm,20)
+```
+
+
+```{r}
+custom_hash <- c("#ai","#artificialintelligence","#generativeai","#genai","#artificial","#intelligence")
+
+bsky_hashtags_dfm <- 
+  tokens(bsky_corpus) %>%
+  tokens_tolower() %>%
+  tokens_select(pattern = "#*") %>%
+  tokens_select(pattern = "[A-Za-z]", valuetype = "regex") %>% 
+  dfm() %>% 
+  dfm_remove(pattern =custom_hash) 
+
+
+head(bsky_hashtags_dfm,20)
+```
+
+
+
+```{r}
+top_hashtags_mast <-  textstat_frequency(mast_hashtags_dfm)
+top_hashtags_mast
+top_hashtags_bsky <-  textstat_frequency(bsky_hashtags_dfm)
+```
+
+
+```{r}
+m1 <- top_hashtags_mast %>% filter(!feature %in% c("#technology","#tech","#llm","#thunkspiracy","#thinktanktheorium","#thunkdeep","#ml")) %>% 
+  slice_max(frequency, n= 25, with_ties = F) %>% 
+  mutate(word = reorder_within(feature,frequency, rank)) %>% 
+  ggplot(aes(frequency, word))+
+  geom_col(fill ="#ff9300")+
+  scale_y_reordered()+
+  labs(x="",y="",title ="")+theme_poppins()
+m1
+```
+```{r}
+b1 <- top_hashtags_bsky %>%  filter(!feature %in% c("#technology","#tech","#aiart","#art","#newmoney","#genai","#makemoney","#money","#monetizeai","#monetize","#generativeai","#llm","#digital","#thebegining","#aibusinessopportunities","#newtechnologies")) %>% 
+  slice_max(frequency, n= 25, with_ties = F) %>% 
+  mutate(word = reorder_within(feature,frequency, rank)) %>% 
+  ggplot(aes(frequency, word))+
+  geom_col(fill ="#1DA1F2")+
+  scale_y_reordered()+
+  labs(x="",y="",title ="")+theme_poppins()
+
+b1
+```
+
+```{r}
+plot_grid(m1, b1)
+
+ggsave("tophashtags.png", device = "png", dpi = 600, width = 9, height = 5.5)
+```
